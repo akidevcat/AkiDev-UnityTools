@@ -1,0 +1,37 @@
+﻿#pragma kernel process_camera_depth_points
+
+#include "LibCommon.cginc"
+
+float input_res_x;
+float input_res_y;
+float input_camera_near;
+float input_camera_far;
+float4x4 input_inv_camera_matrix;
+float4x4 input_inv_projection_matrix;
+int input_point_buffer_offset;
+int input_point_buffer_length;
+Texture2D<float4> input_camera_texture;
+Texture2D<float> input_depth_texture;
+RWBuffer<float4> output_point_buffer;
+RWTexture2D<float4> output_test_rt;
+
+[numthreads(32, 32, 1)]
+void process_camera_depth_points (uint3 dt_id : SV_DispatchThreadID)
+{
+    // Skip outside threads
+    if (dt_id.x >= input_res_x || dt_id.y >= input_res_y)
+        return;
+    
+    const int id = dt_id.x + dt_id.y * input_res_x;
+    const int pb_id = (input_point_buffer_offset + id) % input_point_buffer_length;
+
+    const float2 uv = float2(dt_id.x / input_res_x, dt_id.y / input_res_y);
+    const float depth_len = get_linear_eye_depth_reversed(input_depth_texture[dt_id.xy], input_camera_near, input_camera_far);
+    float3 view_dir = mul(input_inv_projection_matrix, float4(uv * 2.0f - 1.0f, 1.0f, 1.0f));
+    view_dir = mul(input_inv_camera_matrix, float4(view_dir * depth_len, 1.0f));
+    float3 col = input_camera_texture[dt_id.xy].rgb;
+    output_point_buffer[pb_id] = float4(view_dir, decode_rgba(float4(col, 0.0f)));
+    if (input_depth_texture[dt_id.xy] == 0)
+        output_point_buffer[pb_id] = 0;
+    //output_point_buffer[dt_id.x + dt_id.y * input_res_x] = float4(0, 0, 0, 100000);
+}
